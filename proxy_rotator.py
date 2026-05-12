@@ -126,15 +126,19 @@ def handle_client(client_sock):
     try:
         data = client_sock.recv(BUFFER_SIZE)
         if not data:
+            log.debug('Üres adat érkezett, kihagyva')
             return
 
         first_line = data.split(b'\r\n')[0].decode(errors='replace')
         parts = first_line.split()
         if len(parts) < 2:
+            log.debug(f'Érvénytelen kérés: {first_line}')
             return
 
         method = parts[0]
         target = parts[1] if len(parts) > 1 else '?'
+
+        log.info(f'Kérés érkezett: {method} {target}')
 
         proxy, exit_ip = pool.get_random()
         if not proxy:
@@ -146,9 +150,9 @@ def handle_client(client_sock):
 
         if exit_ip != _last_ip:
             _last_ip = exit_ip
-            print(f'\n  IP VALTOZOTT -> {exit_ip}\n', flush=True)
+            print(f'\n>>> IP VALTOZOTT -> {exit_ip} <<<\n', flush=True)
 
-        log.info(f'{method} {target} -> [proxy: {proxy} | kilépő IP: {exit_ip}]')
+        log.info(f'{method} {target} -> [proxy: {proxy} | IP: {exit_ip}]')
 
         upstream = socket.create_connection((proxy_host, int(proxy_port)), timeout=PROXY_TIMEOUT)
 
@@ -162,7 +166,8 @@ def handle_client(client_sock):
             upstream.sendall(data)
             forward_traffic(client_sock, upstream)
 
-    except Exception:
+    except Exception as e:
+        log.debug(f'Hiba: {e}')
         if proxy:
             pool.remove(proxy)
     finally:
