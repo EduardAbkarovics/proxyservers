@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 
 class ProxyPool:
     def __init__(self):
-        self._proxies = []
+        self._proxies = []      # [(proxy_str, exit_ip), ...]
         self._lock = threading.RLock()
 
     def _fetch_raw(self):
@@ -80,25 +80,24 @@ class ProxyPool:
         with ThreadPoolExecutor(max_workers=80) as ex:
             for proxy, ip in ex.map(self._test, sample):
                 if proxy:
-                    working.append(proxy)
+                    working.append((proxy, ip))
         log.info(f'Működő proxyk: {len(working)}')
         with self._lock:
             self._proxies = working
 
     def get_random(self):
         with self._lock:
-            return random.choice(self._proxies) if self._proxies else None
+            return random.choice(self._proxies) if self._proxies else (None, None)
 
     def remove(self, proxy):
         with self._lock:
-            try:
-                self._proxies.remove(proxy)
-            except ValueError:
-                pass
+            self._proxies = [(p, ip) for p, ip in self._proxies if p != proxy]
 
     def count(self):
         with self._lock:
             return len(self._proxies)
+
+_last_ip = None
 
 
 pool = ProxyPool()
@@ -121,6 +120,7 @@ def forward_traffic(src, dst):
 
 
 def handle_client(client_sock):
+    global _last_ip
     upstream = None
     proxy = None
     try:
@@ -134,8 +134,9 @@ def handle_client(client_sock):
             return
 
         method = parts[0]
+        target = parts[1] if len(parts) > 1 else '?'
 
-        proxy = pool.get_random()
+        proxy, exit_ip = pool.get_random()
         if not proxy:
             log.warning('Nincs elérhető proxy!')
             client_sock.sendall(b'HTTP/1.1 503 No Proxy Available\r\n\r\n')
@@ -143,7 +144,11 @@ def handle_client(client_sock):
 
         proxy_host, proxy_port = proxy.rsplit(':', 1)
 
-        log.info(f'{method} -> [{proxy}]')
+        if exit_ip != _last_ip:
+            _last_ip = exit_ip
+            print(f'\n  IP VALTOZOTT -> {exit_ip}\n', flush=True)
+
+        log.info(f'{method} {target} -> [proxy: {proxy} | kilépő IP: {exit_ip}]')
 
         upstream = socket.create_connection((proxy_host, int(proxy_port)), timeout=PROXY_TIMEOUT)
 
@@ -157,7 +162,7 @@ def handle_client(client_sock):
             upstream.sendall(data)
             forward_traffic(client_sock, upstream)
 
-    except Exception as e:
+    except Exception:
         if proxy:
             pool.remove(proxy)
     finally:
