@@ -1,4 +1,4 @@
-  python -m venv venv
-  venv\Scripts\activate
-  pip install requests
-  python proxy_rotator.py
+python -m venv venv
+venv\Scripts\activate
+pip install requests
+brave_inditas.bat
